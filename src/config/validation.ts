@@ -10,10 +10,10 @@ export function validate(config: Record<string, unknown>) {
     FIL_NOTE_CONTRACT_ADDRESS: Joi.string()
       .pattern(/^0x[a-fA-F0-9]{40}$/)
       .required(),
-    // Pinata configuration
+    // Pinata configuration / Pinata 配置
     PINATA_JWT: Joi.string().required(),
     PINATA_GATEWAY: Joi.string().required(),
-    // Optional: upload and storage related parameters
+    // Optional: upload and storage related parameters / 可选：上传和存储相关参数
     UPLOAD_MAX_SIZE: Joi.number()
       .positive()
       .default(512 * 1024),

@@ -23,10 +23,11 @@
 - **框架**: NestJS v11.0.1
 - **语言**: TypeScript
 - **区块链**: Ethers.js v6.15.0
-- **存储**: Pinata (IPFS)
+- **存储**: Pinata (IPFS)，通过 HTTP API 使用 axios
 - **数据验证**: class-validator、class-transformer、joi
 - **安全**: helmet、express-rate-limit
 - **数据库**: lowdb
+- **HTTP 客户端**: axios、form-data
 - **包管理器**: pnpm
 
 ## 项目结构
@@ -34,6 +35,8 @@
 ```
 .
 ├── src/
+│   ├── common/           # 通用服务（Pinata）
+│   │   └── pinata.service.ts
 │   ├── config/           # 配置文件
 │   ├── filters/          # 异常过滤器
 │   ├── interceptors/     # 响应拦截器
@@ -43,7 +46,6 @@
 │   │   └── lowdb.json
 │   ├── verify/           # 核心验证模块
 │   │   ├── dto/          # 数据传输对象
-│   │   ├── entities/     # 实体定义
 │   │   ├── verify.controller.ts
 │   │   ├── verify.service.ts
 │   │   └── verify.module.ts
@@ -70,23 +72,35 @@ pnpm install
 
 ## 环境配置
 
-在项目根目录创建 `.env.development` 和 `.env.production` 文件：
+在项目根目录创建 `.env.development` 和 `.env.production` 文件。可以从 `.env.example` 复制：
 
 ```env
+# Node 环境
+NODE_ENV=development
+
 # 服务器端口
-PORT=3300
+PORT=3000
 
-# Filecoin RPC 端点
-RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+# Filecoin FEVM RPC URL
+RPC_URL=https://api.hyperspace.node.glif.io/rpc/v1
 
-# FilNote 智能合约地址
-FIL_NOTE_CONTRACT_ADDRESS=0xa07CC461166F49E584CD15abA8E60367699be05C
+# FilNote 智能合约地址（40 个十六进制字符，以 0x 开头）
+FIL_NOTE_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000
 
 # Pinata 配置
-PINATA_JWT=your_pinata_jwt_token
-PINATA_GATEWAY=your_pinata_gateway_url
+# 从 https://app.pinata.cloud/ 获取 JWT 令牌
+PINATA_JWT=your_pinata_jwt_token_here
+# Pinata 网关域名（例如：your-gateway.mypinata.cloud）
+PINATA_GATEWAY=your-gateway.mypinata.cloud
 
-# Verify ID TTL（毫秒，默认：5 分钟）
+# 可选：上传配置
+# 最大文件大小（字节，默认：512KB）
+UPLOAD_MAX_SIZE=524288
+
+# 可选：上传目录（默认：uploads）
+UPLOAD_DIR=uploads
+
+# 可选：Verify ID TTL（毫秒，默认：5 分钟）
 VERIFY_ID_TTL_MS=300000
 ```
 
@@ -122,7 +136,8 @@ pnpm run start
 
 ```json
 {
-  "success": true,
+  "status": 0,
+  "message": "OK",
   "data": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
@@ -174,12 +189,13 @@ formData.append('address', address);
 
 ```json
 {
-  "success": true,
-  "data": {
-    "cid": "QmXxxx..."
-  }
+  "status": 0,
+  "message": "OK",
+  "data": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry"
 }
 ```
+
+**注意:** 响应数据直接是 IPFS CID 字符串，而不是包装在对象中。
 
 **错误响应:**
 
@@ -239,7 +255,7 @@ pnpm run debug
 - **Helmet**: HTTP 头部安全防护
 - **速率限制**: API 请求节流（每分钟 100 次请求）
 - **输入验证**: 使用 class-validator 进行 DTO 验证
-- **文件类型验证**: 仅允许 PDF 文件
+- **文件类型验证**: 仅允许 PDF 文件（MIME 类型、扩展名和文件头验证）
 - **大小限制**: 强制 512KB 文件大小限制
 - **签名验证**: 使用 ethers.js 进行加密签名验证，UUID 作为签名明文
 - **链上权限检查**: 通过智能合约验证审计员状态
@@ -267,7 +283,7 @@ pnpm run prod
 | `RPC_URL`                   | Filecoin RPC 端点     | `https://api.calibration.node.glif.io/rpc/v1` |
 | `FIL_NOTE_CONTRACT_ADDRESS` | FilNote 智能合约地址  | `0xa07C...e05C`                               |
 | `PINATA_JWT`                | Pinata JWT 令牌       | `eyJhbGc...`                                  |
-| `PINATA_GATEWAY`            | Pinata 网关 URL       | `https://gateway.pinata.cloud`                |
+| `PINATA_GATEWAY`            | Pinata 网关域名       | `your-gateway.mypinata.cloud`                 |
 | `VERIFY_ID_TTL_MS`          | Verify ID TTL（毫秒） | `300000` (5 分钟)                             |
 
 ## 数据库

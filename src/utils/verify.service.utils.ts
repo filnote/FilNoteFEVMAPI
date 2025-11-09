@@ -1,7 +1,6 @@
 import { JSONFilePreset } from 'lowdb/node';
 import { join, dirname } from 'path';
 import fs from 'fs';
-import { UnauthorizedException } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
 
 type VerificationItem = { expiresAt: number; uuid: string };
@@ -12,12 +11,10 @@ export function isArrayOfStrings(input: unknown): input is string[] {
   return Array.isArray(input) && input.every((i) => typeof i === 'string');
 }
 
-export function now() {
-  return Date.now();
-}
+// Use Date.now() directly instead of wrapper function / 直接使用 Date.now() 而不是包装函数
 
 export function pruneExpired(map: VerificationsMap): void {
-  const t = now();
+  const t = Date.now();
   for (const [k, v] of Object.entries(map)) {
     if (
       !v ||
@@ -51,35 +48,7 @@ export function normalizeAddress(addr: string) {
 }
 
 /**
- * 使用 地址 + verifyId(uuid) 校验有效性：
- * - 地址对应的记录必须存在
- * - uuid 必须匹配 verifyId
- * - 未过期
- * 校验失败会删除该地址下的记录，并抛未授权
- */
-export function assertValidVerifyPair(
-  map: VerificationsMap,
-  address: string,
-  verifyId: string,
-) {
-  const key = normalizeAddress(address);
-  const item = map[key];
-  if (!verifyId || !item) {
-    delete map[key];
-    throw new UnauthorizedException('verifyId 无效或未授权');
-  }
-  if (item.uuid !== verifyId) {
-    delete map[key];
-    throw new UnauthorizedException('verifyId 不匹配');
-  }
-  if (typeof item.expiresAt !== 'number' || item.expiresAt <= now()) {
-    delete map[key];
-    throw new UnauthorizedException('verifyId 已过期');
-  }
-}
-
-/**
- * 获取地址对应的 verifyId（uuid），不存在或过期时返回 null
+ * Get verifyId (uuid) for address, returns null if not exists or expired / 获取地址对应的 verifyId (uuid)，不存在或过期时返回 null
  */
 export function getVerifyIdByAddress(
   map: VerificationsMap,
@@ -88,7 +57,8 @@ export function getVerifyIdByAddress(
   const key = normalizeAddress(address);
   const item = map[key];
   if (!item) return null;
-  if (typeof item.expiresAt !== 'number' || item.expiresAt <= now()) return null;
+  if (typeof item.expiresAt !== 'number' || item.expiresAt <= Date.now())
+    return null;
   if (!item.uuid || typeof item.uuid !== 'string') return null;
   return item.uuid;
 }
@@ -102,11 +72,16 @@ export async function openDb() {
   ensureDbFile(path, defaultData);
   const db = await JSONFilePreset<DbSchema>(path, defaultData);
 
-  if (isArrayOfStrings((db.data as any)?.verifications)) {
-    const old = (db.data as any).verifications as string[];
+  if (
+    isArrayOfStrings(
+      (db.data as unknown as { verifications?: unknown })?.verifications,
+    )
+  ) {
+    const old = (db.data as unknown as { verifications: string[] })
+      .verifications;
     const migrated: VerificationsMap = {};
     const ttlMs = 1 * 60 * 1000;
-    const expireAt = now() + ttlMs;
+    const expireAt = Date.now() + ttlMs;
     for (const id of old) {
       migrated[id] = { expiresAt: expireAt, uuid: uuidv4() };
     }

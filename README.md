@@ -23,10 +23,11 @@ A blockchain verification service built with NestJS framework, providing secure 
 - **Framework**: NestJS v11.0.1
 - **Language**: TypeScript
 - **Blockchain**: Ethers.js v6.15.0
-- **Storage**: Pinata (IPFS)
+- **Storage**: Pinata (IPFS) via HTTP API with axios
 - **Validation**: class-validator, class-transformer, joi
 - **Security**: helmet, express-rate-limit
 - **Database**: lowdb
+- **HTTP Client**: axios, form-data
 - **Package Manager**: pnpm
 
 ## Project Structure
@@ -34,6 +35,8 @@ A blockchain verification service built with NestJS framework, providing secure 
 ```
 .
 ├── src/
+│   ├── common/           # Common services (Pinata)
+│   │   └── pinata.service.ts
 │   ├── config/           # Configuration files
 │   ├── filters/          # Exception filters
 │   ├── interceptors/     # Response interceptors
@@ -43,7 +46,6 @@ A blockchain verification service built with NestJS framework, providing secure 
 │   │   └── lowdb.json
 │   ├── verify/           # Core verification module
 │   │   ├── dto/          # Data Transfer Objects
-│   │   ├── entities/     # Entity definitions
 │   │   ├── verify.controller.ts
 │   │   ├── verify.service.ts
 │   │   └── verify.module.ts
@@ -70,23 +72,35 @@ pnpm install
 
 ## Environment Configuration
 
-Create `.env.development` and `.env.production` files in the root directory:
+Create `.env.development` and `.env.production` files in the root directory. You can copy from `.env.example`:
 
 ```env
-# Server port
-PORT=3300
+# Node Environment
+NODE_ENV=development
 
-# Filecoin RPC endpoint
-RPC_URL=https://api.calibration.node.glif.io/rpc/v1
+# Server Port
+PORT=3000
 
-# FilNote smart contract address
-FIL_NOTE_CONTRACT_ADDRESS=0xa07CC461166F49E584CD15abA8E60367699be05C
+# Filecoin FEVM RPC URL
+RPC_URL=https://api.hyperspace.node.glif.io/rpc/v1
 
-# Pinata configuration
-PINATA_JWT=your_pinata_jwt_token
-PINATA_GATEWAY=your_pinata_gateway_url
+# FilNote Contract Address (40 hex characters, starting with 0x)
+FIL_NOTE_CONTRACT_ADDRESS=0x0000000000000000000000000000000000000000
 
-# Verify ID TTL in milliseconds (default: 5 minutes)
+# Pinata Configuration
+# Get your JWT token from https://app.pinata.cloud/
+PINATA_JWT=your_pinata_jwt_token_here
+# Your Pinata Gateway domain (e.g., your-gateway.mypinata.cloud)
+PINATA_GATEWAY=your-gateway.mypinata.cloud
+
+# Optional: Upload Configuration
+# Maximum file size in bytes (default: 512KB)
+UPLOAD_MAX_SIZE=524288
+
+# Optional: Upload Directory (default: uploads)
+UPLOAD_DIR=uploads
+
+# Optional: Verify ID TTL in milliseconds (default: 5 minutes)
 VERIFY_ID_TTL_MS=300000
 ```
 
@@ -122,7 +136,8 @@ Obtain a temporary verification UUID for the specified address. This UUID needs 
 
 ```json
 {
-  "success": true,
+  "status": 0,
+  "message": "OK",
   "data": "550e8400-e29b-41d4-a716-446655440000"
 }
 ```
@@ -174,12 +189,13 @@ formData.append('address', address);
 
 ```json
 {
-  "success": true,
-  "data": {
-    "cid": "QmXxxx..."
-  }
+  "status": 0,
+  "message": "OK",
+  "data": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry"
 }
 ```
+
+**Note:** The response data is the IPFS CID string directly, not wrapped in an object.
 
 **Error Responses:**
 
@@ -239,7 +255,7 @@ pnpm run debug
 - **Helmet**: HTTP header security
 - **Rate Limiting**: API request throttling (100 requests per minute)
 - **Input Validation**: Class-validator for DTO validation
-- **File Type Validation**: Only allow PDF files
+- **File Type Validation**: Only allow PDF files (MIME type, extension, and magic bytes validation)
 - **Size Limits**: Enforce 512KB file size restriction
 - **Signature Verification**: Cryptographic signature validation using ethers.js with UUID as plaintext
 - **On-chain Permission Check**: Smart contract validation for auditor status
@@ -267,7 +283,7 @@ The production build outputs to the `dist/` directory.
 | `RPC_URL`                   | Filecoin RPC endpoint          | `https://api.calibration.node.glif.io/rpc/v1` |
 | `FIL_NOTE_CONTRACT_ADDRESS` | FilNote smart contract address | `0xa07C...e05C`                               |
 | `PINATA_JWT`                | Pinata JWT token               | `eyJhbGc...`                                  |
-| `PINATA_GATEWAY`            | Pinata gateway URL             | `https://gateway.pinata.cloud`                |
+| `PINATA_GATEWAY`            | Pinata gateway domain          | `your-gateway.mypinata.cloud`                 |
 | `VERIFY_ID_TTL_MS`          | Verify ID TTL in milliseconds  | `300000` (5 minutes)                          |
 
 ## Database

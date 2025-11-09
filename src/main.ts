@@ -4,13 +4,14 @@ import { AppModule } from './app.module';
 import { HttpExceptionFilter } from './filters/http-exception.filter';
 import { ResponseTransformInterceptor } from './interceptors/response-transform.interceptor';
 import { ConfigService } from '@nestjs/config';
-import { ValidationPipe } from '@nestjs/common';
+import { ValidationPipe, Logger } from '@nestjs/common';
 import helmet from 'helmet';
 import rateLimit from 'express-rate-limit';
 import compression from 'compression';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+  const logger = new Logger('Bootstrap');
 
   const configService = app.get(ConfigService);
   app.useGlobalPipes(
@@ -29,9 +30,9 @@ async function bootstrap() {
   app.use(rateLimit({ windowMs: 60_000, max: 100 }));
   app.enableCors();
 
-  const port = configService.get('PORT');
+  const port = configService.get<number>('PORT') ?? 3000;
 
-  await app.listen(port ?? 3000);
-  console.log(`[Nest] server started: http://localhost:${port}`);
+  await app.listen(port);
+  logger.log(`Application is running on: http://localhost:${port}`);
 }
-bootstrap();
+void bootstrap();

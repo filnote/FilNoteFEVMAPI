@@ -6,7 +6,6 @@ import { ConfigService } from '@nestjs/config';
 import { PinataService } from '../common/pinata.service';
 import {
   openDb,
-  now,
   pruneExpired,
   saveDb,
   normalizeAddress,
@@ -65,19 +64,18 @@ export class VerifyService {
       if (!isAuditor) {
         throw new UnauthorizedException('You are not an auditor');
       }
-    } catch (error) {
-      const err = error as Error;
-      throw new UnauthorizedException(err.message);
+    } catch {
+      throw new UnauthorizedException('Authentication failed');
     }
 
     try {
       delete db.data.verifications[normalizedAddress];
       await saveDb(db);
     } catch {
-      // Ignore save errors
+      // Ignore save errors / 忽略保存错误
     }
 
-    // Upload to Pinata
+    // Upload to Pinata / 上传到 Pinata
     const cid = await this.pinataService.uploadFile(buffer, originalFilename);
     return cid;
   }
@@ -94,9 +92,9 @@ export class VerifyService {
     pruneExpired(db.data.verifications);
 
     const existing = db.data.verifications[normalizedAddress];
-    const nowTs = now();
+    const nowTs = Date.now();
 
-    // 未存在或已过期 => 重新生成
+    // Generate new UUID if not exists or expired / 如果不存在或已过期则生成新的 UUID
     if (
       !existing ||
       typeof existing.expiresAt !== 'number' ||
@@ -111,7 +109,7 @@ export class VerifyService {
       return uuid;
     }
 
-    // 存在且未过期 => 原样返回（如需"滑动续期"，可把 expiresAt = nowTs + ttlMs 再保存）
+    // Return existing UUID if valid and not expired / 如果有效且未过期则返回现有 UUID
     return existing.uuid;
   }
 }

@@ -4,7 +4,6 @@ import { AppService } from './app.service';
 import { VerifyModule } from './verify/verify.module';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/validation';
-import * as dotenv from 'dotenv';
 
 @Module({
   imports: [
@@ -25,4 +24,4 @@ import * as dotenv from 'dotenv';
   controllers: [AppController],
   providers: [AppService],
 })
-export class AppModule { }
+export class AppModule {}

@@ -1,7 +1,7 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosResponse } from 'axios';
-import * as FormData from 'form-data';
+import FormData from 'form-data';
 import { extname } from 'path';
 import { lookup as mimeLookup } from 'mime-types';
 
@@ -26,15 +26,13 @@ interface PinataUploadResponse {
 
 @Injectable()
 export class PinataService {
-  private readonly logger = new Logger(PinataService.name);
-
   constructor(private readonly configService: ConfigService) {}
 
   /**
-   * Upload file to Pinata IPFS
-   * @param buffer File buffer
-   * @param filename Original filename
-   * @returns IPFS CID
+   * Upload file to Pinata IPFS / 上传文件到 Pinata IPFS
+   * @param buffer File buffer / 文件缓冲区
+   * @param filename Original filename / 原始文件名
+   * @returns IPFS CID / 返回 IPFS CID
    */
   async uploadFile(buffer: Buffer, filename: string): Promise<string> {
     try {
@@ -43,7 +41,7 @@ export class PinataService {
         throw new Error('PINATA_JWT is not set');
       }
 
-      // Prepare form data
+      // Prepare form data / 准备表单数据
       const formData = new FormData();
       const mimeType =
         (mimeLookup(extname(filename)) as string) || 'application/pdf';
@@ -53,7 +51,7 @@ export class PinataService {
       });
       formData.append('network', 'public');
 
-      // Send request to Pinata
+      // Send request to Pinata / 发送请求到 Pinata
       const response: AxiosResponse<PinataUploadResponse> = await axios.post(
         'https://uploads.pinata.cloud/v3/files',
         formData,
@@ -69,7 +67,7 @@ export class PinataService {
 
       const result: PinataUploadResponse = response.data;
 
-      // Extract CID
+      // Extract CID / 提取 CID
       const cid = result.data?.cid;
       if (!cid) {
         throw new Error('Upload failed');
