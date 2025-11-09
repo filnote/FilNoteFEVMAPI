@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import axios, { AxiosResponse } from 'axios';
-import FormData from 'form-data';
+import * as FormData from 'form-data';
 import { extname } from 'path';
 import { lookup as mimeLookup } from 'mime-types';
 
