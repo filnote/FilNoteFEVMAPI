@@ -3,7 +3,9 @@ import {
   IsNotEmpty,
   IsString,
   Matches,
+  IsOptional,
 } from 'class-validator';
+import { IsNameValueObject } from './validators/json-data.validator';
 
 export class UploadVerifyDto {
   @IsString()
@@ -13,4 +15,8 @@ export class UploadVerifyDto {
   @IsEthereumAddress()
   @IsNotEmpty()
   address: string;
+
+  @IsOptional()
+  @IsNameValueObject()
+  jsonData?: Record<string, unknown>;
 }

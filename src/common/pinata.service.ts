@@ -91,4 +91,73 @@ export class PinataService {
       throw new Error(err.message);
     }
   }
+
+  /**
+   * Upload JSON object to Pinata IPFS [上传 JSON 对象到 Pinata IPFS]
+   * @param jsonData JSON object to upload [要上传的 JSON 对象]
+   * @param filename Filename for the JSON file [JSON 文件名]
+   * @returns IPFS CID [返回 IPFS CID]
+   */
+  async uploadJson(
+    jsonData: Record<string, unknown>,
+    filename: string,
+  ): Promise<string> {
+    try {
+      const pinataJwt = this.configService.get<string>('PINATA_JWT');
+      if (!pinataJwt) {
+        throw new Error('PINATA_JWT is not set');
+      }
+
+      // Convert JSON to buffer [将 JSON 转换为缓冲区]
+      const jsonString = JSON.stringify(jsonData, null, 2);
+      const buffer = Buffer.from(jsonString, 'utf8');
+
+      // Prepare form data [准备表单数据]
+      const formData = new FormData();
+      formData.append('file', buffer, {
+        filename: filename || 'data.json',
+        contentType: 'application/json',
+      });
+      formData.append('network', 'public');
+
+      // Send request to Pinata [发送请求到 Pinata]
+      const response: AxiosResponse<PinataUploadResponse> = await axios.post(
+        'https://uploads.pinata.cloud/v3/files',
+        formData,
+        {
+          headers: {
+            Authorization: `Bearer ${pinataJwt}`,
+            ...formData.getHeaders(),
+          },
+          maxContentLength: Infinity,
+          maxBodyLength: Infinity,
+        },
+      );
+
+      const result: PinataUploadResponse = response.data;
+
+      // Extract CID [提取 CID]
+      const cid = result.data?.cid;
+      if (!cid) {
+        throw new Error('Upload failed');
+      }
+
+      return cid;
+    } catch (error) {
+      const err = error as Error & {
+        response?: { data?: unknown; status?: number };
+        status?: number;
+        statusCode?: number;
+      };
+      if (
+        err.message.includes('401') ||
+        err.message.includes('Not Authorized')
+      ) {
+        throw new Error(
+          'Pinata authentication failed. Please check your PINATA_JWT token is valid and not expired.',
+        );
+      }
+      throw new Error(err.message);
+    }
+  }
 }

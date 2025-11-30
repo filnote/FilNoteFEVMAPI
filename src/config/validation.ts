@@ -21,6 +21,10 @@ export function validate(config: Record<string, unknown>) {
     VERIFY_ID_TTL_MS: Joi.number()
       .positive()
       .default(5 * 60 * 1000),
+    // Platform wallet configuration / 平台钱包配置
+    PLATFORM_WALLET_PRIVATE_KEY: Joi.string()
+      .pattern(/^0x[a-fA-F0-9]{64}$/)
+      .required(),
   });
 
   const validationResult = schema.validate(config, {

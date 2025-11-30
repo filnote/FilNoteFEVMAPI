@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { VerifyModule } from './verify/verify.module';
+import { EncryptModule } from './encrypt/encrypt.module';
 import { ConfigModule } from '@nestjs/config';
 import { validate } from './config/validation';
 
@@ -20,6 +21,7 @@ import { validate } from './config/validation';
       expandVariables: true,
     }),
     VerifyModule,
+    EncryptModule,
   ],
   controllers: [AppController],
   providers: [AppService],
