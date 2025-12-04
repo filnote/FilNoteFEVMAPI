@@ -35,9 +35,16 @@ A blockchain verification service built with NestJS framework, providing secure 
 ```
 .
 ├── src/
-│   ├── common/           # Common services (Pinata)
-│   │   └── pinata.service.ts
+│   ├── common/           # Common services
+│   │   ├── pinata.service.ts      # Pinata IPFS service
+│   │   ├── filnote-contract.service.ts  # FilNote contract interaction
+│   │   └── guards/                # Authentication guards
 │   ├── config/           # Configuration files
+│   ├── encrypt/          # Encryption/decryption module
+│   │   ├── dto/          # Data Transfer Objects
+│   │   ├── encrypt.controller.ts
+│   │   ├── encrypt.service.ts
+│   │   └── encrypt.module.ts
 │   ├── filters/          # Exception filters
 │   ├── interceptors/     # Response interceptors
 │   ├── utils/            # Utilities, ABIs, and database helpers
@@ -153,18 +160,20 @@ Obtain a temporary verification UUID for the specified address. This UUID needs 
 
 **POST** `/verify/upload`
 
-Upload a PDF file with comprehensive verification. This endpoint performs multiple security checks:
+Upload contract file and optionally privacy certificate file with comprehensive verification. This endpoint performs multiple security checks:
 
 1. **UUID Validation**: Retrieves the UUID for the address from database and validates it hasn't expired
 2. **Signature Verification**: Uses the database UUID as plaintext to verify the signature was signed by the claimed address
 3. **On-chain Permission Check**: Verifies that the address is an authorized auditor via smart contract
-4. **File Upload**: Uploads the file to IPFS via Pinata directly from memory
+4. **File Upload**: Uploads files to IPFS via Pinata directly from memory
 
 **Request:**
 
 - Content-Type: `multipart/form-data`
 - Body:
-  - `file`: PDF file (max 512KB, required)
+  - `contract`: PDF contract file (max 512KB, required)
+  - `privacyCertificate`: PDF privacy certificate file (max 512KB, optional, will be encrypted)
+  - `jsonData`: JSON string of public information (required if privacyCertificate is provided)
   - `signature`: Cryptographic signature of the UUID (0x-prefixed hex string, required)
   - `address`: Ethereum address (required)
 
@@ -191,42 +200,94 @@ formData.append('address', address);
 {
   "status": 0,
   "message": "OK",
-  "data": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry"
+  "data": {
+    "contractHash": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry",
+    "encryptedPrivacyCertificateHash": "dGhpc2lzYW5leGFtcGxlZW5jcnlwdGVkZGF0YXdpdGhpdjBhbmRhdXRo...",
+    "privacyCredentialsAbridgedHash": "QmYwZJgXVG6vBrd6V8yu6vGfPc5v8vJ1vZ2vK3vL4vM5vN6"
+  }
 }
 ```
 
-**Note:** The response data is the IPFS CID string directly, not wrapped in an object.
+**Note:**
+
+- `contractHash` is always present (required)
+- `encryptedPrivacyCertificateHash` is present if privacy certificate file was uploaded (encrypted using platform wallet)
+- `privacyCredentialsAbridgedHash` is present if jsonData was provided (public information preview of privacy certificate)
 
 **Error Responses:**
 
 - `401 Unauthorized`: UUID invalid/expired, signature mismatch, or not an auditor
-- `400 Bad Request`: Missing file, invalid file type, or validation errors
+- `400 Bad Request`: Missing contract file, invalid file type, missing jsonData when privacy certificate provided, or validation errors
+
+### Decrypt Privacy Certificate Hash
+
+**POST** `/encrypt/decrypt-hash`
+
+Decrypt the encrypted privacy certificate hash for note creators or investors. This endpoint allows authorized users (creators or investors of a note) to decrypt and view the full privacy certificate after investment.
+
+**Request:**
+
+```json
+{
+  "noteId": 1,
+  "encryptedHash": "dGhpc2lzYW5leGFtcGxlZW5jcnlwdGVkZGF0YXdpdGhpdjBhbmRhdXRo..."
+}
+```
+
+**Response:**
+
+```json
+{
+  "status": 0,
+  "message": "OK",
+  "data": {
+    "decryptedHash": "QmYwZJgXVG6vBrd6V8yu6vGfPc5v8vJ1vZ2vK3vL4vM5vN6",
+    "noteId": 1
+  }
+}
+```
+
+**Security Notes:**
+
+- Only note creators or investors can decrypt the privacy certificate hash
+- Requires signature verification and on-chain permission check
+- The decrypted hash is the IPFS CID of the privacy certificate file
 
 **Security Notes:**
 
 - The UUID is **one-time use** and will be invalidated immediately after successful upload
 - Only addresses registered as auditors in the FilNote smart contract can upload files
 - The signature must be of the database UUID and signed by the corresponding address
-- File size is limited to 512KB
+- Contract file is **required**, privacy certificate file is optional
+- If privacy certificate is provided, jsonData (public preview) is **required**
+- File size is limited to 512KB per file (max 2 files)
 - Files are uploaded directly from memory, not stored on server disk
+- Privacy certificate IPFS hash is encrypted using platform wallet before storage
 
 ## Workflow
 
-The typical workflow for uploading a file:
+The typical workflow for uploading files:
 
 1. **Get UUID**: Client calls `GET /verify/get-verify-uuid/:address` to obtain a temporary UUID
 2. **Sign UUID**: Client signs the UUID with their private key (using `signMessage`)
-3. **Upload file**: Client calls `POST /verify/upload` with:
-   - PDF file
+3. **Upload files**: Client calls `POST /verify/upload` with:
+   - Contract PDF file (required)
+   - Privacy certificate PDF file (optional)
+   - jsonData as JSON string (required if privacy certificate provided)
    - Signature generated in step 2
    - Ethereum address
 4. **Service verification**: Server performs the following checks:
+   - Validates contract file is provided
+   - If privacy certificate is provided, validates jsonData is also provided
    - Retrieves the UUID for the address from database
    - Verifies the signature using the UUID as plaintext
    - Verifies the address is an auditor on-chain
-5. **IPFS upload**: If all checks pass, file is uploaded to IPFS via Pinata directly from memory
+5. **IPFS upload**: If all checks pass:
+   - Contract file is uploaded to IPFS
+   - Privacy certificate file (if provided) is uploaded to IPFS, then its hash is encrypted
+   - jsonData (if provided) is uploaded to IPFS as JSON file
 6. **UUID invalidation**: After successful upload, the address's UUID is immediately deleted from database
-7. **Response**: Service returns the IPFS CID
+7. **Response**: Service returns object with contractHash, encryptedPrivacyCertificateHash (if applicable), and privacyCredentialsAbridgedHash (if applicable)
 
 ## Development
 

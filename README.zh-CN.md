@@ -11,9 +11,12 @@
 - 🔐 **两步验证流程**: 基于 UUID 签名的安全认证流程
 - 📋 **审计员验证**: 通过链上智能合约验证审计员权限
 - ✍️ **签名验证**: 加密签名验证，确保地址所有权
-- 📁 **文件上传**: 支持 PDF 文件上传，限制大小（最大 512KB）
+- 📁 **文件上传**: 支持多个 PDF 文件上传（合同必填，隐私凭证可选），限制大小（每个文件最大 512KB）
+- 🔐 **隐私凭证加密**: 使用平台钱包在存储前加密隐私凭证的 IPFS 哈希
+- 📋 **公开信息预览**: 支持 jsonData 上传作为隐私凭证的预览版本
 - 🌐 **IPFS 存储**: 集成 Pinata 实现去中心化文件存储，直接从内存上传
 - 🔗 **智能合约集成**: 与 FEVM 上的 FilNote 智能合约交互
+- 🔓 **哈希解密**: 为授权用户（创建者/投资者）解密隐私凭证哈希
 - 🛡️ **安全防护**: 内置速率限制、helmet 保护、输入验证和一次性 UUID 令牌
 - 📊 **轻量数据库**: 使用 LowDB 存储临时验证数据，支持 TTL 过期机制
 - ⚡ **高性能**: 内存直接上传到 IPFS，无需本地磁盘存储
@@ -35,9 +38,16 @@
 ```
 .
 ├── src/
-│   ├── common/           # 通用服务（Pinata）
-│   │   └── pinata.service.ts
+│   ├── common/           # 通用服务
+│   │   ├── pinata.service.ts      # Pinata IPFS 服务
+│   │   ├── filnote-contract.service.ts  # FilNote 合约交互
+│   │   └── guards/                # 身份验证守卫
 │   ├── config/           # 配置文件
+│   ├── encrypt/          # 加密/解密模块
+│   │   ├── dto/          # 数据传输对象
+│   │   ├── encrypt.controller.ts
+│   │   ├── encrypt.service.ts
+│   │   └── encrypt.module.ts
 │   ├── filters/          # 异常过滤器
 │   ├── interceptors/     # 响应拦截器
 │   ├── utils/            # 工具类、ABI 和数据库辅助函数
@@ -153,7 +163,7 @@ pnpm run start
 
 **POST** `/verify/upload`
 
-上传 PDF 文件并进行全面验证。该接口执行多项安全检查：
+上传合同文件和可选的隐私凭证文件并进行全面验证。该接口执行多项安全检查：
 
 1. **UUID 验证**: 从数据库获取该地址对应的 UUID 并验证是否过期
 2. **签名验证**: 使用数据库中的 UUID 作为明文，验证签名是否由声明地址签发
@@ -164,7 +174,9 @@ pnpm run start
 
 - Content-Type: `multipart/form-data`
 - 请求体:
-  - `file`: PDF 文件（最大 512KB，必填）
+  - `contract`: PDF 合同文件（最大 512KB，必填）
+  - `privacyCertificate`: PDF 隐私凭证文件（最大 512KB，可选，将被加密）
+  - `jsonData`: 公开信息的 JSON 字符串（提供隐私凭证时为必填）
   - `signature`: 对 UUID 的加密签名（0x 前缀的十六进制字符串，必填）
   - `address`: 以太坊地址（必填）
 
@@ -191,24 +203,69 @@ formData.append('address', address);
 {
   "status": 0,
   "message": "OK",
-  "data": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry"
+  "data": {
+    "contractHash": "bafkreiembdmqw4bfqgyw2jet7cpfi5oawnkuj7mwzr57gqgziom6yrwiry",
+    "encryptedPrivacyCertificateHash": "dGhpc2lzYW5leGFtcGxlZW5jcnlwdGVkZGF0YXdpdGhpdjBhbmRhdXRo...",
+    "privacyCredentialsAbridgedHash": "QmYwZJgXVG6vBrd6V8yu6vGfPc5v8vJ1vZ2vK3vL4vM5vN6"
+  }
 }
 ```
 
-**注意:** 响应数据直接是 IPFS CID 字符串，而不是包装在对象中。
+**注意:**
+
+- `contractHash` 始终存在（必填）
+- `encryptedPrivacyCertificateHash` 在提供隐私凭证文件时存在（使用平台钱包加密）
+- `privacyCredentialsAbridgedHash` 在提供 jsonData 时存在（隐私凭证的公开信息预览）
 
 **错误响应:**
 
 - `401 Unauthorized`: UUID 无效/过期、签名不匹配或不是审计员
-- `400 Bad Request`: 缺少文件、无效文件类型或验证错误
+- `400 Bad Request`: 缺少合同文件、无效文件类型、提供隐私凭证时缺少 jsonData 或验证错误
+
+### 解密隐私凭证哈希
+
+**POST** `/encrypt/decrypt-hash`
+
+为票据创建者或投资者解密加密的隐私凭证哈希。该接口允许授权用户（票据的创建者或投资者）在投资后解密并查看完整的隐私凭证。
+
+**请求:**
+
+```json
+{
+  "noteId": 1,
+  "encryptedHash": "dGhpc2lzYW5leGFtcGxlZW5jcnlwdGVkZGF0YXdpdGhpdjBhbmRhdXRo..."
+}
+```
+
+**响应:**
+
+```json
+{
+  "status": 0,
+  "message": "OK",
+  "data": {
+    "decryptedHash": "QmYwZJgXVG6vBrd6V8yu6vGfPc5v8vJ1vZ2vK3vL4vM5vN6",
+    "noteId": 1
+  }
+}
+```
+
+**安全说明:**
+
+- 只有票据创建者或投资者可以解密隐私凭证哈希
+- 需要签名验证和链上权限检查
+- 解密后的哈希是隐私凭证文件的 IPFS CID
 
 **安全说明:**
 
 - UUID 为**一次性使用**，上传成功后立即失效
 - 只有 FilNote 智能合约中注册为审计员的地址才能上传文件
 - 签名必须是对数据库中 UUID 的签名，且由对应地址签发
-- 文件大小限制为 512KB
+- 合同文件为**必填**，隐私凭证文件为可选
+- 如果提供隐私凭证，jsonData（公开预览）为**必填**
+- 文件大小限制为每个文件 512KB（最多 2 个文件）
 - 文件直接从内存上传，不在服务器磁盘留存
+- 隐私凭证的 IPFS 哈希在上链前使用平台钱包加密
 
 ## 工作流程
 
@@ -217,16 +274,23 @@ formData.append('address', address);
 1. **获取 UUID**: 客户端调用 `GET /verify/get-verify-uuid/:address` 获取临时 UUID
 2. **签名 UUID**: 客户端使用私钥对 UUID 进行签名（使用 `signMessage`）
 3. **上传文件**: 客户端调用 `POST /verify/upload`，携带：
-   - PDF 文件
+   - PDF 合同文件（必填）
+   - PDF 隐私凭证文件（可选）
+   - jsonData 作为 JSON 字符串（提供隐私凭证时为必填）
    - 步骤 2 中生成的签名
    - 以太坊地址
 4. **服务验证**: 服务端执行以下检查：
+   - 验证合同文件已提供
+   - 如果提供隐私凭证，验证 jsonData 也已提供
    - 从数据库获取该地址对应的 UUID
    - 使用 UUID 作为明文验证签名
    - 验证地址在链上是否为审计员
-5. **IPFS 上传**: 如果所有检查通过，文件直接从内存通过 Pinata 上传到 IPFS
+5. **IPFS 上传**: 如果所有检查通过：
+   - 合同文件上传到 IPFS
+   - 隐私凭证文件（如果提供）上传到 IPFS，然后对其哈希进行加密
+   - jsonData（如果提供）作为 JSON 文件上传到 IPFS
 6. **UUID 失效**: 上传成功后，该地址的 UUID 立即从数据库删除
-7. **响应**: 服务返回 IPFS CID
+7. **响应**: 服务返回包含 contractHash、encryptedPrivacyCertificateHash（如果适用）和 privacyCredentialsAbridgedHash（如果适用）的对象
 
 ## 开发
 
