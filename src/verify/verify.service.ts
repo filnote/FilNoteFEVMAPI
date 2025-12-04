@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
 import { PinataService } from '../common/pinata.service';
 import { FilNoteContractService } from '../common/filnote-contract.service';
+import { EncryptService } from '../encrypt/encrypt.service';
 import {
   openDb,
   pruneExpired,
@@ -18,12 +19,28 @@ export class VerifyService {
     private readonly configService: ConfigService,
     private readonly pinataService: PinataService,
     private readonly filNoteContractService: FilNoteContractService,
+    private readonly encryptService: EncryptService,
   ) {}
-  async uploadFile(
+
+  /**
+   * Upload contract, privacy certificate files, and/or jsonData [上传合同、隐私凭证文件和/或 jsonData]
+   * @param signature Signature for authentication [用于身份验证的签名]
+   * @param address Auditor address [审计员地址]
+   * @param contractBuffer Contract file buffer (optional) [合同文件缓冲区（可选）]
+   * @param contractFilename Contract file name (optional) [合同文件名（可选）]
+   * @param privacyCertificateBuffer Privacy certificate file buffer (optional) [隐私凭证文件缓冲区（可选）]
+   * @param privacyCertificateFilename Privacy certificate file name (optional) [隐私凭证文件名（可选）]
+   * @param jsonData Public information that can be viewed without investment (optional) [对外可见的信息，无需投资即可查看（可选）]
+   * @returns Object with contractHash, encryptedPrivacyCertificateHash, and privacyCredentialsAbridgedHash [返回包含 contractHash、encryptedPrivacyCertificateHash 和 privacyCredentialsAbridgedHash 的对象]
+   */
+  async uploadFiles(
     signature: string,
     address: string,
-    buffer: Buffer,
-    originalFilename: string,
+    contractBuffer?: Buffer,
+    contractFilename?: string,
+    privacyCertificateBuffer?: Buffer,
+    privacyCertificateFilename?: string,
+    jsonData?: Record<string, unknown>,
   ) {
     const db = await openDb();
     const normalizedAddress = normalizeAddress(address);
@@ -69,66 +86,46 @@ export class VerifyService {
       throw new UnauthorizedException('Authentication failed');
     }
 
-    // Upload to Pinata / 上传到 Pinata
-    const cid = await this.pinataService.uploadFile(buffer, originalFilename);
-    return cid;
-  }
+    const result: {
+      contractHash?: string;
+      encryptedPrivacyCertificateHash?: string;
+      privacyCredentialsAbridgedHash?: string;
+    } = {};
 
-  async uploadJson(
-    signature: string,
-    address: string,
-    jsonData: Record<string, unknown>,
-  ) {
-    const db = await openDb();
-    const normalizedAddress = normalizeAddress(address);
-
-    const storedVerifyId = getVerifyIdByAddress(
-      db.data.verifications,
-      normalizedAddress,
-    );
-    if (!storedVerifyId) {
-      throw new UnauthorizedException('Permission error');
+    // Upload contract to Pinata if provided [如果提供了合同文件，则上传到 Pinata]
+    if (contractBuffer && contractFilename) {
+      const contractHash = await this.pinataService.uploadFile(
+        contractBuffer,
+        contractFilename,
+      );
+      result.contractHash = contractHash;
     }
 
-    let recoveredAddress: string;
-    try {
-      recoveredAddress = ethers.verifyMessage(storedVerifyId, signature);
-    } catch {
-      throw new UnauthorizedException('Invalid signature format');
+    // Upload and encrypt privacy certificate if provided [如果提供了隐私凭证，则上传并加密]
+    if (privacyCertificateBuffer && privacyCertificateFilename) {
+      const privacyCertificateHash = await this.pinataService.uploadFile(
+        privacyCertificateBuffer,
+        privacyCertificateFilename,
+      );
+
+      // Encrypt the privacy certificate IPFS hash [加密隐私凭证的 IPFS 哈希]
+      const encryptedPrivacyCertificateHash =
+        this.encryptService.encryptHashUrl(privacyCertificateHash);
+
+      result.encryptedPrivacyCertificateHash = encryptedPrivacyCertificateHash;
     }
 
-    const normalizedRecovered = normalizeAddress(recoveredAddress);
-    if (normalizedRecovered !== normalizedAddress) {
-      throw new UnauthorizedException('Signature mismatch');
+    // Upload jsonData to Pinata if provided (public information) [如果提供了 jsonData，则上传到 Pinata（对外可见的信息）]
+    if (jsonData) {
+      const privacyCredentialsAbridgedHash =
+        await this.pinataService.uploadJson(
+          jsonData,
+          'privacy-credentials.json',
+        );
+      result.privacyCredentialsAbridgedHash = privacyCredentialsAbridgedHash;
     }
 
-    // Delete UUID immediately after signature verification to prevent replay attacks [签名验证后立即删除 UUID 以防止重放攻击]
-    try {
-      delete db.data.verifications[normalizedAddress];
-      await saveDb(db);
-    } catch {
-      // Ignore save errors [忽略保存错误]
-    }
-
-    try {
-      const isAuditor =
-        await this.filNoteContractService.isAuditor(normalizedAddress);
-      if (!isAuditor) {
-        throw new UnauthorizedException('You are not an auditor');
-      }
-    } catch (error) {
-      if (error instanceof UnauthorizedException) {
-        throw error;
-      }
-      throw new UnauthorizedException('Authentication failed');
-    }
-
-    // Upload JSON to Pinata [上传 JSON 到 Pinata]
-    const cid = await this.pinataService.uploadJson(
-      jsonData,
-      'privacy-credentials.json',
-    );
-    return cid;
+    return result;
   }
 
   async getVerifyUUID(

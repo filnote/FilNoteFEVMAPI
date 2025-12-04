@@ -3,13 +3,13 @@ import {
   Post,
   Body,
   UseInterceptors,
-  UploadedFile,
+  UploadedFiles,
   BadRequestException,
   Get,
   Param,
 } from '@nestjs/common';
 import { VerifyService } from './verify.service';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { UploadVerifyDto } from './dto/upload-verify.dto';
 import { extname } from 'path';
 
@@ -19,9 +19,9 @@ export class VerifyController {
 
   @Post('upload')
   @UseInterceptors(
-    FileInterceptor('file', {
+    AnyFilesInterceptor({
       fileFilter: (req, file, cb) => {
-        // Allow both PDF files and JSON data upload [允许 PDF 文件和 JSON 数据上传]
+        // Only allow PDF files [只允许 PDF 文件]
         if (file) {
           const allowedMimeTypes = ['application/pdf'];
           const allowedExtensions = ['.pdf'];
@@ -40,51 +40,78 @@ export class VerifyController {
 
         cb(null, true);
       },
-      limits: { fileSize: 1024 * 512, files: 1 }, // 512KB & single file [512KB 且单文件]
+      limits: { fileSize: 1024 * 512, files: 2 }, // 512KB per file, max 2 files [每个文件 512KB，最多 2 个文件]
     }),
   )
-  async uploadFile(
+  async uploadFiles(
     @Body() dto: UploadVerifyDto,
-    @UploadedFile() file?: Express.Multer.File,
+    @UploadedFiles() files?: Express.Multer.File[],
   ) {
-    // Either file or jsonData must be provided [必须提供文件或 JSON 数据]
-    if (!file && !dto.jsonData) {
-      throw new BadRequestException('Either file or jsonData is required');
+    // Either contract file or jsonData must be provided [必须提供合同文件或 jsonData]
+    if ((!files || files.length === 0) && !dto.jsonData) {
+      throw new BadRequestException(
+        'Either contract file or jsonData is required',
+      );
     }
 
-    // If both are provided, prefer file [如果两者都提供，优先使用文件]
-    if (file) {
-      if (!file.buffer) {
-        throw new BadRequestException('File buffer is required');
+    // Find contract and privacy certificate files [查找合同和隐私凭证文件]
+    // If only one file is uploaded, it's the contract [如果只上传一个文件，则是合同]
+    // If two files are uploaded, identify by fieldname [如果上传两个文件，通过 fieldname 识别]
+    const contractFileCandidate =
+      files && files.length > 0
+        ? files.length === 1
+          ? files[0]
+          : files.find((f) => f.fieldname === 'contract')
+        : undefined;
+    const privacyCertificateFile =
+      files && files.length > 0
+        ? files.find((f) => f.fieldname === 'privacyCertificate')
+        : undefined;
+
+    // Validate contract file if provided [如果提供了合同文件，则验证]
+    if (contractFileCandidate) {
+      if (!contractFileCandidate.buffer) {
+        throw new BadRequestException('Contract file buffer is required');
       }
 
-      // Validate file content (PDF header) [验证文件内容（PDF 文件头）]
-      const pdfHeader = Buffer.from(file.buffer).subarray(0, 4).toString();
-      if (pdfHeader !== '%PDF') {
-        throw new BadRequestException('Invalid PDF file format');
+      // Validate contract file content (PDF header) [验证合同文件内容（PDF 文件头）]
+      const contractPdfHeader = Buffer.from(contractFileCandidate.buffer)
+        .subarray(0, 4)
+        .toString();
+      if (contractPdfHeader !== '%PDF') {
+        throw new BadRequestException('Invalid contract PDF file format');
+      }
+    }
+
+    // Validate privacy certificate file if provided [如果提供了隐私凭证文件，则验证]
+    if (privacyCertificateFile) {
+      if (!privacyCertificateFile.buffer) {
+        throw new BadRequestException(
+          'Privacy certificate file buffer is required',
+        );
       }
 
-      const result = await this.verifyService.uploadFile(
-        dto.signature,
-        dto.address,
-        file.buffer,
-        file.originalname,
-      );
-      return result;
+      // Validate privacy certificate file content (PDF header) [验证隐私凭证文件内容（PDF 文件头）]
+      const privacyPdfHeader = Buffer.from(privacyCertificateFile.buffer)
+        .subarray(0, 4)
+        .toString();
+      if (privacyPdfHeader !== '%PDF') {
+        throw new BadRequestException(
+          'Invalid privacy certificate PDF file format',
+        );
+      }
     }
 
-    // Handle JSON data upload [处理 JSON 数据上传]
-    if (dto.jsonData) {
-      const result = await this.verifyService.uploadJson(
-        dto.signature,
-        dto.address,
-        dto.jsonData,
-      );
-      return result;
-    }
-
-    // This should never be reached due to validation above [由于上面的验证，这不应该被执行]
-    throw new BadRequestException('Either file or jsonData is required');
+    const result = await this.verifyService.uploadFiles(
+      dto.signature,
+      dto.address,
+      contractFileCandidate?.buffer,
+      contractFileCandidate?.originalname,
+      privacyCertificateFile?.buffer,
+      privacyCertificateFile?.originalname,
+      dto.jsonData,
+    );
+    return result;
   }
 
   @Get('get-verify-uuid/:address')
