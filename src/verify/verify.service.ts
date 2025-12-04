@@ -1,4 +1,8 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
+} from '@nestjs/common';
 import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
@@ -26,18 +30,19 @@ export class VerifyService {
    * Upload contract, privacy certificate files, and/or jsonData [上传合同、隐私凭证文件和/或 jsonData]
    * @param signature Signature for authentication [用于身份验证的签名]
    * @param address Auditor address [审计员地址]
-   * @param contractBuffer Contract file buffer (optional) [合同文件缓冲区（可选）]
-   * @param contractFilename Contract file name (optional) [合同文件名（可选）]
+   * @param contractBuffer Contract file buffer (required) [合同文件缓冲区（必填）]
+   * @param contractFilename Contract file name (required) [合同文件名（必填）]
    * @param privacyCertificateBuffer Privacy certificate file buffer (optional) [隐私凭证文件缓冲区（可选）]
    * @param privacyCertificateFilename Privacy certificate file name (optional) [隐私凭证文件名（可选）]
-   * @param jsonData Public information that can be viewed without investment (optional) [对外可见的信息，无需投资即可查看（可选）]
+   * @param jsonData Preview version of privacy certificate - public information that can be viewed without investment [隐私凭证的预览版本 - 对外可见的信息，无需投资即可查看]
+   *                 Required if privacyCertificateBuffer is provided, optional otherwise [如果提供了 privacyCertificateBuffer 则必填，否则可选]
    * @returns Object with contractHash, encryptedPrivacyCertificateHash, and privacyCredentialsAbridgedHash [返回包含 contractHash、encryptedPrivacyCertificateHash 和 privacyCredentialsAbridgedHash 的对象]
    */
   async uploadFiles(
     signature: string,
     address: string,
-    contractBuffer?: Buffer,
-    contractFilename?: string,
+    contractBuffer: Buffer,
+    contractFilename: string,
     privacyCertificateBuffer?: Buffer,
     privacyCertificateFilename?: string,
     jsonData?: Record<string, unknown>,
@@ -86,20 +91,24 @@ export class VerifyService {
       throw new UnauthorizedException('Authentication failed');
     }
 
+    // Contract file is required [合同文件是必填的]
+    if (!contractBuffer || !contractFilename) {
+      throw new BadRequestException('Contract file is required');
+    }
+
+    // Upload contract to Pinata [上传合同文件到 Pinata]
+    const contractHash = await this.pinataService.uploadFile(
+      contractBuffer,
+      contractFilename,
+    );
+
     const result: {
-      contractHash?: string;
+      contractHash: string;
       encryptedPrivacyCertificateHash?: string;
       privacyCredentialsAbridgedHash?: string;
-    } = {};
-
-    // Upload contract to Pinata if provided [如果提供了合同文件，则上传到 Pinata]
-    if (contractBuffer && contractFilename) {
-      const contractHash = await this.pinataService.uploadFile(
-        contractBuffer,
-        contractFilename,
-      );
-      result.contractHash = contractHash;
-    }
+    } = {
+      contractHash,
+    };
 
     // Upload and encrypt privacy certificate if provided [如果提供了隐私凭证，则上传并加密]
     if (privacyCertificateBuffer && privacyCertificateFilename) {
@@ -115,7 +124,7 @@ export class VerifyService {
       result.encryptedPrivacyCertificateHash = encryptedPrivacyCertificateHash;
     }
 
-    // Upload jsonData to Pinata if provided (public information) [如果提供了 jsonData，则上传到 Pinata（对外可见的信息）]
+    // Upload jsonData to Pinata if provided (preview version of privacy certificate) [如果提供了 jsonData，则上传到 Pinata（隐私凭证的预览版本）]
     if (jsonData) {
       const privacyCredentialsAbridgedHash =
         await this.pinataService.uploadJson(

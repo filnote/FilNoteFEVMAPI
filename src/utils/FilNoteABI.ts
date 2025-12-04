@@ -86,11 +86,6 @@ export const FilNoteABI = [
         "name": "borrowingDays",
         "type": "uint16",
         "internalType": "uint16"
-      },
-      {
-        "name": "privacyCertificateHash",
-        "type": "string",
-        "internalType": "string"
       }
     ],
     "outputs": [
@@ -605,6 +600,11 @@ export const FilNoteABI = [
         "internalType": "string"
       },
       {
+        "name": "encryptedPrivacyCertificateHash",
+        "type": "string",
+        "internalType": "string"
+      },
+      {
         "name": "privacyCredentialsAbridgedHash",
         "type": "string",
         "internalType": "string"
@@ -964,4 +964,4 @@ export const FilNoteABI = [
   }
 ] as const;
 
-export const FilNoteAddress = '0x5d7A90AD1Cd6aB82D4C01235D2373C812983CAE0';
+export const FilNoteAddress = '0xD88dB8719f066a88F7FA67Ce7761b428f95B7C30';

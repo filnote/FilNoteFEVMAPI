@@ -7,17 +7,26 @@ import {
   BadRequestException,
   Get,
   Param,
+  UsePipes,
 } from '@nestjs/common';
 import { VerifyService } from './verify.service';
 import { AnyFilesInterceptor } from '@nestjs/platform-express';
 import { UploadVerifyDto } from './dto/upload-verify.dto';
 import { extname } from 'path';
+import { ValidationPipe } from '@nestjs/common';
 
 @Controller('verify')
 export class VerifyController {
   constructor(private readonly verifyService: VerifyService) {}
 
   @Post('upload')
+  @UsePipes(
+    new ValidationPipe({
+      whitelist: true,
+      transform: true,
+      forbidNonWhitelisted: false, // Allow file fields in FormData [允许 FormData 中的文件字段]
+    }),
+  )
   @UseInterceptors(
     AnyFilesInterceptor({
       fileFilter: (req, file, cb) => {
@@ -47,40 +56,37 @@ export class VerifyController {
     @Body() dto: UploadVerifyDto,
     @UploadedFiles() files?: Express.Multer.File[],
   ) {
-    // Either contract file or jsonData must be provided [必须提供合同文件或 jsonData]
-    if ((!files || files.length === 0) && !dto.jsonData) {
-      throw new BadRequestException(
-        'Either contract file or jsonData is required',
-      );
+    // Contract file is required [合同文件是必填的]
+    if (!files || files.length === 0) {
+      throw new BadRequestException('Contract file is required');
     }
 
     // Find contract and privacy certificate files [查找合同和隐私凭证文件]
     // If only one file is uploaded, it's the contract [如果只上传一个文件，则是合同]
     // If two files are uploaded, identify by fieldname [如果上传两个文件，通过 fieldname 识别]
     const contractFileCandidate =
-      files && files.length > 0
-        ? files.length === 1
-          ? files[0]
-          : files.find((f) => f.fieldname === 'contract')
-        : undefined;
-    const privacyCertificateFile =
-      files && files.length > 0
-        ? files.find((f) => f.fieldname === 'privacyCertificate')
-        : undefined;
+      files.length === 1
+        ? files[0]
+        : files.find((f) => f.fieldname === 'contract');
+    const privacyCertificateFile = files.find(
+      (f) => f.fieldname === 'privacyCertificate',
+    );
 
-    // Validate contract file if provided [如果提供了合同文件，则验证]
-    if (contractFileCandidate) {
-      if (!contractFileCandidate.buffer) {
-        throw new BadRequestException('Contract file buffer is required');
-      }
+    // Contract file is required [合同文件是必填的]
+    if (!contractFileCandidate) {
+      throw new BadRequestException('Contract file is required');
+    }
 
-      // Validate contract file content (PDF header) [验证合同文件内容（PDF 文件头）]
-      const contractPdfHeader = Buffer.from(contractFileCandidate.buffer)
-        .subarray(0, 4)
-        .toString();
-      if (contractPdfHeader !== '%PDF') {
-        throw new BadRequestException('Invalid contract PDF file format');
-      }
+    if (!contractFileCandidate.buffer) {
+      throw new BadRequestException('Contract file buffer is required');
+    }
+
+    // Validate contract file content (PDF header) [验证合同文件内容（PDF 文件头）]
+    const contractPdfHeader = Buffer.from(contractFileCandidate.buffer)
+      .subarray(0, 4)
+      .toString();
+    if (contractPdfHeader !== '%PDF') {
+      throw new BadRequestException('Invalid contract PDF file format');
     }
 
     // Validate privacy certificate file if provided [如果提供了隐私凭证文件，则验证]
@@ -100,13 +106,20 @@ export class VerifyController {
           'Invalid privacy certificate PDF file format',
         );
       }
+
+      // If privacy certificate is provided, jsonData (preview version) is required [如果提供了隐私凭证，则 jsonData（预览版本）是必填的]
+      if (!dto.jsonData || Object.keys(dto.jsonData).length === 0) {
+        throw new BadRequestException(
+          'jsonData (preview of privacy certificate) is required when privacy certificate file is provided',
+        );
+      }
     }
 
     const result = await this.verifyService.uploadFiles(
       dto.signature,
       dto.address,
-      contractFileCandidate?.buffer,
-      contractFileCandidate?.originalname,
+      contractFileCandidate.buffer,
+      contractFileCandidate.originalname,
       privacyCertificateFile?.buffer,
       privacyCertificateFile?.originalname,
       dto.jsonData,
