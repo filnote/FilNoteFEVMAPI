@@ -1,9 +1,9 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
-import { ethers, Contract } from 'ethers';
-import { FilNoteABI } from '../utils/FilNoteABI';
+import { ethers } from 'ethers';
 import { v4 as uuidv4 } from 'uuid';
 import { ConfigService } from '@nestjs/config';
 import { PinataService } from '../common/pinata.service';
+import { FilNoteContractService } from '../common/filnote-contract.service';
 import {
   openDb,
   pruneExpired,
@@ -17,6 +17,7 @@ export class VerifyService {
   constructor(
     private readonly configService: ConfigService,
     private readonly pinataService: PinataService,
+    private readonly filNoteContractService: FilNoteContractService,
   ) {}
   async uploadFile(
     signature: string,
@@ -47,32 +48,25 @@ export class VerifyService {
       throw new UnauthorizedException('Signature mismatch');
     }
 
-    const rpcUrl = this.configService.get<string>('RPC_URL');
-    const filNoteAddress = this.configService.get<string>(
-      'FIL_NOTE_CONTRACT_ADDRESS',
-    );
-    if (!rpcUrl || !filNoteAddress) {
-      throw new Error('RPC_URL or FIL_NOTE_CONTRACT_ADDRESS is not set');
-    }
-
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const contract = new Contract(filNoteAddress, FilNoteABI, provider);
-    try {
-      const isAuditor = (await contract.isAuditor(
-        normalizedAddress,
-      )) as boolean;
-      if (!isAuditor) {
-        throw new UnauthorizedException('You are not an auditor');
-      }
-    } catch {
-      throw new UnauthorizedException('Authentication failed');
-    }
-
+    // Delete UUID immediately after signature verification to prevent replay attacks [签名验证后立即删除 UUID 以防止重放攻击]
     try {
       delete db.data.verifications[normalizedAddress];
       await saveDb(db);
     } catch {
-      // Ignore save errors / 忽略保存错误
+      // Ignore save errors [忽略保存错误]
+    }
+
+    try {
+      const isAuditor =
+        await this.filNoteContractService.isAuditor(normalizedAddress);
+      if (!isAuditor) {
+        throw new UnauthorizedException('You are not an auditor');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Authentication failed');
     }
 
     // Upload to Pinata / 上传到 Pinata
@@ -108,32 +102,25 @@ export class VerifyService {
       throw new UnauthorizedException('Signature mismatch');
     }
 
-    const rpcUrl = this.configService.get<string>('RPC_URL');
-    const filNoteAddress = this.configService.get<string>(
-      'FIL_NOTE_CONTRACT_ADDRESS',
-    );
-    if (!rpcUrl || !filNoteAddress) {
-      throw new Error('RPC_URL or FIL_NOTE_CONTRACT_ADDRESS is not set');
-    }
-
-    const provider = new ethers.JsonRpcProvider(rpcUrl);
-    const contract = new Contract(filNoteAddress, FilNoteABI, provider);
-    try {
-      const isAuditor = (await contract.isAuditor(
-        normalizedAddress,
-      )) as boolean;
-      if (!isAuditor) {
-        throw new UnauthorizedException('You are not an auditor');
-      }
-    } catch {
-      throw new UnauthorizedException('Authentication failed');
-    }
-
+    // Delete UUID immediately after signature verification to prevent replay attacks [签名验证后立即删除 UUID 以防止重放攻击]
     try {
       delete db.data.verifications[normalizedAddress];
       await saveDb(db);
     } catch {
       // Ignore save errors [忽略保存错误]
+    }
+
+    try {
+      const isAuditor =
+        await this.filNoteContractService.isAuditor(normalizedAddress);
+      if (!isAuditor) {
+        throw new UnauthorizedException('You are not an auditor');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+      throw new UnauthorizedException('Authentication failed');
     }
 
     // Upload JSON to Pinata [上传 JSON 到 Pinata]

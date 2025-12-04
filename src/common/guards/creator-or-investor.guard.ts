@@ -15,15 +15,23 @@ import { FilNoteContractService } from '../filnote-contract.service';
 
 interface RequestWithVerifiedAddress {
   verifiedAddress?: string;
+  verifiedNoteId?: number;
+  note?: {
+    id: number;
+    creator: string;
+    investor: string;
+    [key: string]: unknown;
+  };
   body?: {
     address?: string;
     signature?: string;
+    noteId?: number;
     [key: string]: unknown;
   };
 }
 
 @Injectable()
-export class AuditorGuard implements CanActivate {
+export class CreatorOrInvestorGuard implements CanActivate {
   constructor(
     private readonly filNoteContractService: FilNoteContractService,
   ) {}
@@ -38,12 +46,27 @@ export class AuditorGuard implements CanActivate {
       throw new UnauthorizedException('Request body is required');
     }
 
-    // Extract address and signature from request body [从请求体中提取地址和签名]
+    // Extract address, signature, and noteId from request body [从请求体中提取地址、签名和 noteId]
     const address = body.address;
     const signature = body.signature;
+    const noteId = body.noteId;
 
     if (!address || !signature) {
       throw new UnauthorizedException('Address and signature are required');
+    }
+
+    if (noteId === undefined || noteId === null) {
+      throw new UnauthorizedException('Note ID is required');
+    }
+
+    // Validate noteId type and range [验证 noteId 类型和范围]
+    if (typeof noteId !== 'number' || !Number.isInteger(noteId) || noteId < 1) {
+      throw new UnauthorizedException('Invalid note ID format');
+    }
+
+    // Validate noteId is within safe range [验证 noteId 在安全范围内]
+    if (noteId > Number.MAX_SAFE_INTEGER) {
+      throw new UnauthorizedException('Note ID is too large');
     }
 
     // Normalize address [标准化地址]
@@ -83,22 +106,29 @@ export class AuditorGuard implements CanActivate {
       // Ignore save errors [忽略保存错误]
     }
 
-    // Verify auditor status on-chain [链上验证审计员状态]
+    // Verify user is creator or investor of the note [验证用户是票据的创建者或投资者]
     try {
-      const isAuditor =
-        await this.filNoteContractService.isAuditor(normalizedAddress);
-      if (!isAuditor) {
-        throw new UnauthorizedException('You are not an auditor');
+      const isCreatorOrInvestor =
+        await this.filNoteContractService.isCreatorOrInvestor(
+          noteId,
+          normalizedAddress,
+        );
+
+      if (!isCreatorOrInvestor) {
+        throw new UnauthorizedException(
+          'You are not the creator or investor of this note',
+        );
       }
     } catch (error) {
       if (error instanceof UnauthorizedException) {
         throw error;
       }
-      throw new UnauthorizedException('Authentication failed');
+      throw new UnauthorizedException('Failed to verify note ownership');
     }
 
-    // Attach verified address to request [将验证的地址附加到请求对象]
+    // Attach verified address and noteId to request [将验证的地址和 noteId 附加到请求对象]
     request.verifiedAddress = normalizedAddress;
+    request.verifiedNoteId = noteId;
 
     return true;
   }
